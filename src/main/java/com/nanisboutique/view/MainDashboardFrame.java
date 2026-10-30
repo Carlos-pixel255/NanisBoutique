@@ -1,62 +1,56 @@
 package com.nanisboutique.view;
 
+import com.nanisboutique.models.Empleado;
+
 import javax.swing.*;
 import java.awt.*;
 
+/** Ventana principal; muestra los módulos según el rol almacenado del usuario autenticado. */
 public class MainDashboardFrame extends JFrame {
-    private String rolUsuario;
+    private final Empleado usuarioSesion;
 
-    public MainDashboardFrame(String rol) {
-        this.rolUsuario = rol;
-        setTitle("Nanis Boutique (Popayán) - Panel Principal [" + rolUsuario + "]");
-        setSize(900, 650);
+    public MainDashboardFrame(Empleado usuarioSesion) {
+        this.usuarioSesion = usuarioSesion;
+        String rol = usuarioSesion.getRol();
+        setTitle("Nanis Boutique - Panel principal [" + rol + "]");
+        setSize(1120, 760);
+        setMinimumSize(new Dimension(900, 620));
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        setLayout(new BorderLayout());
+        setLayout(new BorderLayout(5, 5));
 
-        // Barra superior de bienvenida
-        JLabel lblWelcome = new JLabel(" Bienvenido a Nanis Boutique - Rol activo: " + rolUsuario, JLabel.LEFT);
-        lblWelcome.setFont(new Font("Arial", Font.BOLD, 12));
-        lblWelcome.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
-        add(lblWelcome, BorderLayout.NORTH);
+        JLabel bienvenida = new JLabel("  Nanis Boutique  |  " + usuarioSesion.getNombre()
+                + "  |  Rol: " + rol + "  |  Cédula: " + usuarioSesion.getIdCedula());
+        bienvenida.setFont(new Font("SansSerif", Font.BOLD, 13));
+        bienvenida.setBorder(BorderFactory.createEmptyBorder(10, 6, 10, 6));
+        JButton btnCerrarSesion = new JButton("Cerrar sesión");
+        JPanel encabezado = new JPanel(new BorderLayout());
+        encabezado.add(bienvenida, BorderLayout.CENTER);
+        encabezado.add(btnCerrarSesion, BorderLayout.EAST);
+        add(encabezado, BorderLayout.NORTH);
 
-        // Panel con pestañas (JTabbedPane) para navegar entre las Épicas
-        JTabbedPane tabbedPane = new JTabbedPane();
+        JTabbedPane pestañas = new JTabbedPane();
+        pestañas.addTab("Inventario", new InventarioPanel(usuarioSesion));
 
-        // Pestaña 1: Inventario (Épica 2)[cite: 5]
-        tabbedPane.addTab("Inventario & Productos", crearPanelInventario());
-
-        // Pestaña 2: Punto de Venta / POS (Épica 3)[cite: 5, 8]
-        tabbedPane.addTab("Punto de Venta (POS)", crearPanelPOS());
-
-        // Pestaña 3: Gestión de Empleados y Configuración (Solo Administrador - Épica 1 y 4)[cite: 5, 6, 9]
-        if (rolUsuario.equals("Administrador")) {
-            tabbedPane.addTab("Gestión de Personal", crearPanelEmpleados());
-            tabbedPane.addTab("Configuración DB", crearPanelConfig());
+        boolean esAdmin = "Administrador".equalsIgnoreCase(rol);
+        boolean esCajero = "Cajero".equalsIgnoreCase(rol);
+        if (esAdmin || esCajero) {
+            pestañas.addTab("Punto de venta", new PosPanel(usuarioSesion));
+            pestañas.addTab("Historial diario / Caja", new HistorialVentasPanel());
         }
+        if (esAdmin) {
+            pestañas.addTab("Gestión de empleados", new EmpleadosPanel());
+            pestañas.addTab("Configuración de tienda", new ConfiguracionTiendaPanel());
+        }
+        add(pestañas, BorderLayout.CENTER);
 
-        add(tabbedPane, BorderLayout.CENTER);
-    }
-
-    private JPanel crearPanelInventario() {
-        // Retorna el panel funcional de inventario con filtros y tabla en tiempo real (Épica 2)[cite: 5, 7]
-        return new InventarioPanel();
-    }
-
-    private JPanel crearPanelPOS() {
-        // Retorna el panel funcional del Punto de Venta y Carrito (Épica 3)[cite: 5, 8]
-        return new PosPanel();
-    }
-
-    private JPanel crearPanelEmpleados() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(new JLabel("Módulo de Registro y Modificación de Empleados (Épica 1)", JLabel.CENTER));
-        return panel;
-    }
-
-    private JPanel crearPanelConfig() {
-        JPanel panel = new JPanel(new BorderLayout());
-        panel.add(new JLabel("Módulo de Parámetros de la Base de Datos (Épica 4)", JLabel.CENTER));
-        return panel;
+        btnCerrarSesion.addActionListener(e -> {
+            int respuesta = JOptionPane.showConfirmDialog(this, "¿Desea cerrar la sesión actual?",
+                    "Cerrar sesión", JOptionPane.YES_NO_OPTION);
+            if (respuesta == JOptionPane.YES_OPTION) {
+                new LoginFrame().setVisible(true);
+                dispose();
+            }
+        });
     }
 }
