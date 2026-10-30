@@ -1,147 +1,217 @@
 package com.nanisboutique.view;
 
 import com.nanisboutique.dao.BoutiqueDAO;
+import com.nanisboutique.models.DetalleVenta;
+import com.nanisboutique.models.Empleado;
+import com.nanisboutique.models.Producto;
+import com.nanisboutique.models.Venta;
+
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
-import java.awt.event.ActionEvent;
+import java.math.BigDecimal;
+import java.sql.SQLException;
+import java.text.NumberFormat;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
 
+/** Punto de venta integrado con Oracle. Los precios y existencias se vuelven a verificar al confirmar. */
 public class PosPanel extends JPanel {
-    private JTable tablaProductosPOS, tablaCarrito;
-    private DefaultTableModel modeloProductos, modeloCarrito;
-    private JComboBox<String> cmbMedioPago;
-    private JLabel lblTotalPagar;
-    private double totalAcumulado = 0.0;
-    private BoutiqueDAO dao;
+    private final BoutiqueDAO dao = new BoutiqueDAO();
+    private final Empleado empleadoSesion;
+    private final DefaultTableModel modeloProductos = new DefaultTableModel(
+            new Object[]{"Código", "Tipo", "Talla", "Color", "Precio COP", "Stock"}, 0) {
+        @Override public boolean isCellEditable(int row, int column) { return false; }
+    };
+    private final DefaultTableModel modeloCarrito = new DefaultTableModel(
+            new Object[]{"Código", "Tipo", "Talla", "Color", "Precio unitario", "Cantidad", "Subtotal"}, 0) {
+        @Override public boolean isCellEditable(int row, int column) { return false; }
+    };
+    private final JTable tablaProductos = new JTable(modeloProductos);
+    private final JTable tablaCarrito = new JTable(modeloCarrito);
+    private final JComboBox<String> cmbMedioPago = new JComboBox<>(new String[]{"-- Seleccionar --", "Efectivo", "Transferencia"});
+    private final JLabel lblTotalPagar = new JLabel("Total a pagar: $0 COP", SwingConstants.RIGHT);
 
-    public PosPanel() {
-        dao = new BoutiqueDAO();
-        setLayout(new BorderLayout(10, 10));
+    public PosPanel(Empleado empleadoSesion) {
+        this.empleadoSesion = empleadoSesion;
+        setLayout(new BorderLayout(8, 8));
         setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-        // 1. Panel Izquierdo: Catálogo de Productos Disponibles para la Venta
-        JPanel panelCatalogo = new JPanel(new BorderLayout());
-        panelCatalogo.setBorder(BorderFactory.createTitledBorder("Catálogo Disponible en Tienda (Popayán)"));
-        
-        String[] colProductos = {"Código", "Prenda", "Talla", "Precio COP", "Stock"};
-        modeloProductos = new DefaultTableModel(colProductos, 0);
-        tablaProductosPOS = new JTable(modeloProductos);
-        panelCatalogo.add(new JScrollPane(tablaProductosPOS), BorderLayout.CENTER);
+        JPanel catalogo = new JPanel(new BorderLayout(5, 5));
+        catalogo.setBorder(BorderFactory.createTitledBorder("Catálogo disponible en Nanis Boutique"));
+        tablaProductos.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        tablaProductos.setAutoCreateRowSorter(true);
+        catalogo.add(new JScrollPane(tablaProductos), BorderLayout.CENTER);
+        JPanel accionesCatalogo = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton btnAgregar = new JButton("Agregar una unidad al carrito");
+        JButton btnActualizarCatalogo = new JButton("Actualizar catálogo");
+        btnAgregar.setBackground(new Color(163, 109, 96)); btnAgregar.setForeground(Color.WHITE);
+        accionesCatalogo.add(btnAgregar); accionesCatalogo.add(btnActualizarCatalogo);
+        catalogo.add(accionesCatalogo, BorderLayout.SOUTH);
 
-        JButton btnAgregarCarrito = new JButton("Agregar al Carrito ➔");
-        btnAgregarCarrito.setBackground(new Color(163, 109, 96)); // Rose Gold corporativo
-        btnAgregarCarrito.setForeground(Color.WHITE);
-        panelCatalogo.add(btnAgregarCarrito, BorderLayout.SOUTH);
+        JPanel derecha = new JPanel(new BorderLayout(5, 5));
+        derecha.setPreferredSize(new Dimension(430, 0));
+        derecha.setBorder(BorderFactory.createTitledBorder("Carrito de venta"));
+        tablaCarrito.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        derecha.add(new JScrollPane(tablaCarrito), BorderLayout.CENTER);
 
-        // 2. Panel Derecho: Carrito de Compras y Cierre de Venta (Épica 3)[cite: 5, 8]
-        JPanel panelDerecho = new JPanel(new BorderLayout(5, 5));
-        panelDerecho.setPreferredSize(new Dimension(350, 0));
-        panelDerecho.setBorder(BorderFactory.createTitledBorder("Orden de Compra / Carrito"));
+        JPanel checkout = new JPanel(new GridLayout(0, 1, 5, 5));
+        lblTotalPagar.setFont(new Font("Arial", Font.BOLD, 15));
+        checkout.add(lblTotalPagar);
+        JPanel pago = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        pago.add(new JLabel("Medio de pago:")); pago.add(cmbMedioPago);
+        checkout.add(pago);
+        JPanel botonesCarrito = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton btnQuitar = new JButton("Quitar seleccionado");
+        JButton btnVaciar = new JButton("Vaciar carrito");
+        botonesCarrito.add(btnQuitar); botonesCarrito.add(btnVaciar);
+        checkout.add(botonesCarrito);
+        JButton btnConfirmar = new JButton("Confirmar venta");
+        btnConfirmar.setBackground(new Color(46, 139, 87)); btnConfirmar.setForeground(Color.WHITE);
+        checkout.add(btnConfirmar);
+        derecha.add(checkout, BorderLayout.SOUTH);
 
-        String[] colCarrito = {"Prenda", "Precio", "Cant"};
-        modeloCarrito = new DefaultTableModel(colCarrito, 0);
-        tablaCarrito = new JTable(modeloCarrito);
-        panelDerecho.add(new JScrollPane(tablaCarrito), BorderLayout.CENTER);
+        JSplitPane split = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, catalogo, derecha);
+        split.setResizeWeight(0.55);
+        split.setDividerLocation(500);
+        add(split, BorderLayout.CENTER);
 
-        // Subpanel inferior del carrito (Total, Medio de pago y Botón Confirmar)
-        JPanel panelCheckout = new JPanel(new GridLayout(4, 1, 5, 5));
-        
-        lblTotalPagar = new JLabel("Total a Pagar: $0 COP", SwingConstants.RIGHT);
-        lblTotalPagar.setFont(new Font("Arial", Font.BOLD, 14));
-        panelCheckout.add(lblTotalPagar);
-
-        JPanel panelMetodo = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        panelMetodo.add(new JLabel("Medio Pago:"));
-        cmbMedioPago = new JComboBox<>(new String[]{"-- Seleccionar --", "Efectivo", "Transferencia"});
-        panelMetodo.add(cmbMedioPago);
-        panelCheckout.add(panelMetodo);
-
-        JButton btnConfirmarVenta = new JButton("Confirmar Venta y Pagar");
-        btnConfirmarVenta.setBackground(new Color(46, 139, 87)); // Verde éxito
-        btnConfirmarVenta.setForeground(Color.WHITE);
-        panelCheckout.add(btnConfirmarVenta);
-
-        panelDerecho.add(panelCheckout, BorderLayout.SOUTH);
-
-        // Agregar paneles principales al grid central
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, panelCatalogo, panelDerecho);
-        splitPane.setDividerLocation(450);
-        add(splitPane, BorderLayout.CENTER);
-
-        // Cargar datos simulados de catálogo
-        cargarCatalogoPOS();
-
-        // 3. Eventos de los Botones
-        btnAgregarCarrito.addActionListener((ActionEvent e) -> {
-            agregarAlCarrito();
-        });
-
-        btnConfirmarVenta.addActionListener((ActionEvent e) -> {
-            procesarVentaCaja();
-        });
+        btnAgregar.addActionListener(e -> agregarAlCarrito());
+        btnActualizarCatalogo.addActionListener(e -> cargarCatalogo());
+        btnQuitar.addActionListener(e -> quitarDelCarrito());
+        btnVaciar.addActionListener(e -> vaciarCarrito());
+        btnConfirmar.addActionListener(e -> procesarVenta());
+        cargarCatalogo();
     }
 
-    private void cargarCatalogoPOS() {
-        modeloProductos.setRowCount(0);
-        // Datos sincronizados con el inventario de la boutique
-        Object[][] catalogo = {
-            {"PRD-001", "Blusa (M)", "M", 65000, 12},
-            {"PRD-002", "Jeans (S)", "S", 120000, 8},
-            {"PRD-003", "Vestido (L)", "L", 145000, 5},
-            {"PRD-004", "Chaqueta (M)", "M", 180000, 4}
-        };
-        for (Object[] row : catalogo) {
-            modeloProductos.addRow(row);
+    private void cargarCatalogo() {
+        try {
+            List<Producto> productos = dao.obtenerProductos("", "", "");
+            modeloProductos.setRowCount(0);
+            for (Producto p : productos) {
+                modeloProductos.addRow(new Object[]{p.getIdProducto(), p.getTipo(), p.getTalla(), p.getColor(), p.getPrecio(), p.getStock()});
+            }
+            if (productos.isEmpty()) {
+                JOptionPane.showMessageDialog(this, "No hay productos registrados en el inventario.", "Catálogo vacío", JOptionPane.INFORMATION_MESSAGE);
+            }
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this, "No fue posible cargar el catálogo desde Oracle.\n" + ex.getMessage(),
+                    "Error de conexión", JOptionPane.ERROR_MESSAGE);
         }
     }
 
     private void agregarAlCarrito() {
-        int filaSeleccionada = tablaProductosPOS.getSelectedRow();
-        if (filaSeleccionada == -1) {
-            JOptionPane.showMessageDialog(this, "Por favor seleccione una prenda del catálogo.", "Aviso", JOptionPane.WARNING_MESSAGE);
+        int vista = tablaProductos.getSelectedRow();
+        if (vista < 0) {
+            JOptionPane.showMessageDialog(this, "Seleccione una prenda del catálogo.", "Aviso", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        int fila = tablaProductos.convertRowIndexToModel(vista);
+        String codigo = String.valueOf(modeloProductos.getValueAt(fila, 0));
+        String tipo = String.valueOf(modeloProductos.getValueAt(fila, 1));
+        String talla = String.valueOf(modeloProductos.getValueAt(fila, 2));
+        String color = String.valueOf(modeloProductos.getValueAt(fila, 3));
+        double precio = ((Number) modeloProductos.getValueAt(fila, 4)).doubleValue();
+        int stock = ((Number) modeloProductos.getValueAt(fila, 5)).intValue();
+        if (stock <= 0) {
+            JOptionPane.showMessageDialog(this, "Este producto está agotado.", "Stock insuficiente", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
-        String codigo = modeloProductos.getValueAt(filaSeleccionada, 0).toString();
-        String prenda = modeloProductos.getValueAt(filaSeleccionada, 1).toString();
-        double precio = Double.parseDouble(modeloProductos.getValueAt(filaSeleccionada, 3).toString());
-        int stockDisponible = Integer.parseInt(modeloProductos.getValueAt(filaSeleccionada, 4).toString());
-
-        if (stockDisponible <= 0) {
-            JOptionPane.showMessageDialog(this, "No hay suficiente stock disponible para completar la cantidad solicitada de este producto.", "Error de Stock", JOptionPane.ERROR_MESSAGE);
-            return;
+        int filaCarrito = buscarEnCarrito(codigo);
+        if (filaCarrito >= 0) {
+            int cantidadActual = ((Number) modeloCarrito.getValueAt(filaCarrito, 5)).intValue();
+            if (cantidadActual + 1 > stock) {
+                JOptionPane.showMessageDialog(this, "No hay suficiente stock disponible. Existencia actual: " + stock + ".",
+                        "Stock insuficiente", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+            int nuevaCantidad = cantidadActual + 1;
+            modeloCarrito.setValueAt(nuevaCantidad, filaCarrito, 5);
+            modeloCarrito.setValueAt(precio * nuevaCantidad, filaCarrito, 6);
+        } else {
+            modeloCarrito.addRow(new Object[]{codigo, tipo, talla, color, precio, 1, precio});
         }
-
-        // Agregar al carrito
-        modeloCarrito.addRow(new Object[]{prenda, precio, 1});
-        totalAcumulado += precio;
-        lblTotalPagar.setText("Total a Pagar: $" + totalAcumulado + " COP");
+        actualizarTotal();
     }
 
-    private void procesarVentaCaja() {
+    private int buscarEnCarrito(String codigo) {
+        for (int i = 0; i < modeloCarrito.getRowCount(); i++) {
+            if (codigo.equals(String.valueOf(modeloCarrito.getValueAt(i, 0)))) return i;
+        }
+        return -1;
+    }
+
+    private void quitarDelCarrito() {
+        int fila = tablaCarrito.getSelectedRow();
+        if (fila < 0) {
+            JOptionPane.showMessageDialog(this, "Seleccione una línea del carrito para quitarla.", "Aviso", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        modeloCarrito.removeRow(tablaCarrito.convertRowIndexToModel(fila));
+        actualizarTotal();
+    }
+
+    private void vaciarCarrito() {
+        modeloCarrito.setRowCount(0);
+        actualizarTotal();
+    }
+
+    private void actualizarTotal() {
+        BigDecimal total = BigDecimal.ZERO;
+        for (int i = 0; i < modeloCarrito.getRowCount(); i++) {
+            total = total.add(BigDecimal.valueOf(((Number) modeloCarrito.getValueAt(i, 6)).doubleValue()));
+        }
+        lblTotalPagar.setText("Total a pagar: " + moneda(total.doubleValue()));
+    }
+
+    private void procesarVenta() {
         if (modeloCarrito.getRowCount() == 0) {
-            JOptionPane.showMessageDialog(this, "El carrito de compras está vacío.", "Error", JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(this, "El carrito de compras está vacío.", "Validación", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        String medioPago = String.valueOf(cmbMedioPago.getSelectedItem());
+        if (!List.of("Efectivo", "Transferencia").contains(medioPago)) {
+            JOptionPane.showMessageDialog(this, "Debe seleccionar un medio de pago válido (efectivo o transferencia).",
+                    "Validación de pago", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        if (empleadoSesion == null || empleadoSesion.getIdCedula() == null) {
+            JOptionPane.showMessageDialog(this, "No fue posible identificar al empleado que registra la venta. Cierre sesión y vuelva a ingresar.",
+                    "Sesión inválida", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
-        String medioPagoSeleccionado = cmbMedioPago.getSelectedItem().toString();
-        if (medioPagoSeleccionado.equals("-- Seleccionar --")) {
-            JOptionPane.showMessageDialog(this, "Debe seleccionar un medio de pago válido (efectivo o transferencia) para continuar.", "Validación de Pago", JOptionPane.WARNING_MESSAGE);
-            return;
+        List<DetalleVenta> items = new ArrayList<>();
+        for (int i = 0; i < modeloCarrito.getRowCount(); i++) {
+            String codigo = String.valueOf(modeloCarrito.getValueAt(i, 0));
+            int cantidad = ((Number) modeloCarrito.getValueAt(i, 5)).intValue();
+            double precio = ((Number) modeloCarrito.getValueAt(i, 4)).doubleValue();
+            items.add(new DetalleVenta(codigo, cantidad, precio));
         }
 
-        // Invocación a la capa DAO / procedimiento almacenado PL/SQL para registrar la venta y descontar stock
-        boolean exito = true; // Simulación de transacción exitosa en base de datos
-
-        if (exito) {
-            JOptionPane.showMessageDialog(this, "Venta registrada exitosamente. Comprobante generado para Nanis Boutique.", "Éxito", JOptionPane.INFORMATION_MESSAGE);
-            modeloCarrito.setRowCount(0);
-            totalAcumulado = 0.0;
-            lblTotalPagar.setText("Total a Pagar: $0 COP");
+        try {
+            Venta registrada = dao.registrarVenta(empleadoSesion.getIdCedula(), medioPago, items);
+            JOptionPane.showMessageDialog(this,
+                    "Venta registrada exitosamente.\nComprobante: " + registrada.getIdVenta()
+                            + "\nTotal: " + moneda(registrada.getTotalVenta()),
+                    "Venta completada", JOptionPane.INFORMATION_MESSAGE);
+            vaciarCarrito();
             cmbMedioPago.setSelectedIndex(0);
-            cargarCatalogoPOS(); // Refrescar stock visual
-        } else {
-            JOptionPane.showMessageDialog(this, "Error al procesar la transacción en la base de datos.", "Error SQL", JOptionPane.ERROR_MESSAGE);
+            cargarCatalogo();
+        } catch (SQLException ex) {
+            JOptionPane.showMessageDialog(this,
+                    "No se pudo completar la venta. No se conservaron cambios parciales.\n" + ex.getMessage(),
+                    "Venta no registrada", JOptionPane.ERROR_MESSAGE);
+            cargarCatalogo();
         }
+    }
+
+    private String moneda(double valor) {
+        NumberFormat nf = NumberFormat.getCurrencyInstance(new Locale("es", "CO"));
+        nf.setMaximumFractionDigits(0);
+        nf.setMinimumFractionDigits(0);
+        return nf.format(valor);
     }
 }
